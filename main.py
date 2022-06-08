@@ -21,7 +21,8 @@ def fetch_picture(id: str):
     return
 
 @app.post("/picture/{id}")
-def post_picture(id: str, img: UploadFile)
+def post_picture(id: str, img: UploadFile):
+    pass
 
 
 
