@@ -1,5 +1,5 @@
 from asyncio.log import logger
-from fastapi import FastAPI, UploadFile, Depends, status
+from fastapi import FastAPI, UploadFile, Depends, status, Body
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from PIL import Image
 from starlette.responses import StreamingResponse
@@ -8,6 +8,8 @@ import io
 import logging
 from logging.handlers import TimedRotatingFileHandler
 from pydantic import BaseModel
+from auth.auth_handler import sign_JWT
+from auth.auth_bearer import JWTBearer
 
 
 import aiohttp
@@ -30,6 +32,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 class User(BaseModel):
     username: str
+    password: str
 
 session = None
 
@@ -40,6 +43,7 @@ async def startup_event():
     global session
     session = aiohttp.ClientSession()
     global pool
+    global userspool
     pool = await asyncpg.create_pool('postgresql://postgres@localhost/imagesapi', password = '1234')
     userspool = await asyncpg.create_pool('postgresql://postgres@localhost/users', password = '1234')
     
@@ -50,8 +54,37 @@ async def shutdown_event():
     await pool.close()
     await userspool.close()
 
+@app.post('/user/signup')
+async def create_user(user: User = Body(...)):
+    await userspool.execute(
+        '''
+        INSERT INTO user_table VALUES ($1, $2)
+        ''', user.username, user.password
+    )
+    return sign_JWT(user.username)
 
-@app.post("/uploadfile")
+
+async def check_user(data: User):
+    check_result = await userspool.fetch('''
+        SELECT username FROM user_table
+        WHERE (username = $1) AND (password = $2)
+    ''', data.username, data.password)
+    if len(check_result) == 0:
+        return False
+    return True
+
+
+@app.post("/user/login")
+async def user_login(user: User = Body(...)):
+    if check_user(user):
+        return sign_JWT(user.username)
+    logger.info('Unsuccessful login attempt')
+    return {
+        "error": "Wrong login details!"
+    }
+
+
+@app.post("/uploadfile", dependencies=[Depends(JWTBearer())])
 async def post_picture(img: UploadFile, quality: Union[int, None] = None, x: Union[int, None] = None, y: Union[int, None] = None):
     request_object_content = await img.read()
     im = Image.open(io.BytesIO(request_object_content))
@@ -78,7 +111,7 @@ async def post_picture(img: UploadFile, quality: Union[int, None] = None, x: Uni
 # Image returned via bytes array streaming, thought creating temp files to send would be space consuming
 
 
-@app.get("/picture/{id}")
+@app.get("/picture/{id}", dependencies=[Depends(JWTBearer())])
 async def get_picture(id: int):
     result = await pool.fetch('''
         SELECT img FROM image
