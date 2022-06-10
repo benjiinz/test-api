@@ -15,20 +15,19 @@ from auth.auth_bearer import JWTBearer
 import aiohttp
 import asyncpg
 
-FORMAT = '%(asctime)s,%(msecs)d: %(levelname)s: %(message)s'
+FORMAT = '%(asctime)s,%(msecs)d: %(Funcname)s: %(levelname)s: %(message)s'
 
-f = logging.Formatter('%(asctime)s,%(msecs)d: %(levelname)s: %(message)s')
+formatter = logging.Formatter(FORMAT)
 
+handler = TimedRotatingFileHandler('logs/app.log', 
+                                   when='midnight',
+                                   backupCount=10)
+handler.setFormatter(formatter)
 logger = logging.getLogger(__name__)
-logger.setLevel('DEBUG')
-handler = TimedRotatingFileHandler('logs/app.log', when="midnight", interval=1)
-handler.setFormatter(f)
-handler.suffix = "%Y%m%d"
 logger.addHandler(handler)
+logger.setLevel(logging.DEBUG)
 
 app = FastAPI()
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 class User(BaseModel):
     username: str
@@ -38,7 +37,7 @@ session = None
 
 
 
-@app.on_event('startup') #starts a Client session and connects to DB on app startup
+@app.on_event('startup') # starts a Client session and connects to DB on app startup
 async def startup_event():
     global session
     session = aiohttp.ClientSession()
@@ -61,6 +60,7 @@ async def create_user(user: User = Body(...)):
         INSERT INTO user_table VALUES ($1, $2)
         ''', user.username, user.password
     )
+    logger.info('New user created')
     return sign_JWT(user.username)
 
 
